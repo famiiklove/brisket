@@ -6928,61 +6928,258 @@ end
 -- bevels, a slow light glint, all over a softly moving colour backdrop that the
 -- glass refracts. Without EditableMesh access it falls back to a 2D version.
 ---------------------------------------------------------------------------
+-- the intro always plays before the first window; automated tests may set
+-- getgenv().LiquidGlassSkipIntro = true before loading the library
+local Intro = { Played = env.LiquidGlassSkipIntro == true, Active = false }
+Library._intro = Intro
 
--- Создаем стилизованный контейнер под текст
-local wordContainer = new("Frame", {
-    BackgroundTransparency = 1,
-    AnchorPoint = Vector2.new(0.5, 0.5),
-    Position = UDim2.fromScale(0.5, 0.47),
-    Size = UDim2.fromScale(0.7, 0.2),
-    ZIndex = 5,
-    Parent = holder
-})
+local INTRO_CREDIT = "FAMIIK"
 
--- Тень/Глубина под текстом
-local shadow = new("TextLabel", {
-    Text = "FAMIIK",
-    Font = Enum.Font.FredokaOne, -- или GothamBlack
-    TextScaled = true,
-    TextColor3 = Color3.fromRGB(20, 10, 50),
-    TextTransparency = 0.5,
-    Size = UDim2.fromScale(1, 1),
-    Position = UDim2.fromOffset(0, 6),
-    BackgroundTransparency = 1,
-    ZIndex = 1,
-    Parent = wordContainer
-})
+-- 2D подписи
+local function labels(holder, title)
+	local made = Glass.text({ Parent = holder, Text = "M A D E   B Y", Weight = Enum.FontWeight.SemiBold, TextSize = 15, XAlign = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(0.5, 1), Size = UDim2.fromOffset(300, 18), ZIndex = 4 })
+	Theme.unbind(made, "TextColor3")
+	made.TextColor3 = WHITE
+	made.TextTransparency = 1
+	local sub
+	if title and title ~= "" then
+		sub = Glass.text({ Parent = holder, Text = title, Weight = Enum.FontWeight.SemiBold, TextSize = 18, XAlign = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(0.5, 0), Size = UDim2.fromOffset(500, 22), ZIndex = 4 })
+		Theme.unbind(sub, "TextColor3")
+		sub.TextColor3 = WHITE
+		sub.TextTransparency = 1
+	end
+	local hint = Glass.text({ Parent = holder, Text = "Click or press Space to skip", TextSize = 12, XAlign = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -28), Size = UDim2.fromOffset(200, 16), ZIndex = 4 })
+	Theme.unbind(hint, "TextColor3")
+	hint.TextColor3 = WHITE
+	hint.TextTransparency = 1
+	return made, sub, hint
+end
 
--- Основной стеклянный текст
-local word = new("TextLabel", {
-    Text = "FAMIIK",
-    Font = Enum.Font.FredokaOne,
-    TextScaled = true,
-    TextColor3 = Color3.new(1, 1, 1),
-    TextTransparency = 0,
-    Size = UDim2.fromScale(1, 1),
-    BackgroundTransparency = 1,
-    ZIndex = 2,
-    Parent = wordContainer
-})
+function Intro.play(o)
+	o = o or {}
+	Intro.Played = true
+	Intro.Active = true
+	local done = false
+	local cleanup = {}
+	local function finish()
+		if done then return end
+		done = true
+		Intro.Active = false
+		for _, fn in ipairs(cleanup) do pcall(fn) end
+		for _, fn in ipairs(Intro.waiting or {}) do task.spawn(fn) end
+		Intro.waiting = nil
+	end
 
--- Стеклянная фаска (неоновый контур)
-local stroke = new("UIStroke", {
-    Thickness = 2.5,
-    Color = Color3.fromRGB(220, 200, 255),
-    Transparency = 0.3,
-    ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
-    Parent = word
-})
+	local holder = new("Frame", { Name = "Intro", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = nextZ(2000), Parent = Library.Gui })
+	table.insert(cleanup, function() holder:Destroy() end)
+	local catch = new("TextButton", { BackgroundTransparency = 1, Text = "", AutoButtonColor = false, Size = UDim2.fromScale(1, 1), ZIndex = 10, Parent = holder })
+	local made, sub, hint = labels(holder, o.Title)
 
--- Бегающий хромированный блик
-local sheen = new("UIGradient", {
-    Rotation = 25,
-    Offset = Vector2.new(-1, 0),
-    Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(180, 180, 255)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 255)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 180, 255)),
-    }),
-    Parent = word
-})
+	-- ==================== ФОН: РАЗМЕШИВАНИЕ ТУШИ И КРАСКИ ====================
+	local bgBase = new("Frame", { BorderSizePixel = 0, BackgroundColor3 = Color3.fromRGB(12, 12, 14), BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 1, Parent = holder })
+	
+	-- Слой 1: Разводы туши
+	local bgMix1 = new("Frame", { BorderSizePixel = 0, BackgroundColor3 = WHITE, BackgroundTransparency = 0.5, Size = UDim2.fromScale(2, 2), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), ZIndex = 1, Parent = bgBase })
+	local grad1 = new("UIGradient", {
+		Rotation = 35,
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0.0, Color3.fromRGB(10, 10, 12)),
+			ColorSequenceKeypoint.new(0.35, Color3.fromRGB(45, 45, 50)),
+			ColorSequenceKeypoint.new(0.65, Color3.fromRGB(220, 220, 230)),
+			ColorSequenceKeypoint.new(1.0, Color3.fromRGB(15, 15, 18)),
+		}),
+		Parent = bgMix1
+	})
+
+	-- Слой 2: Встречный вихрь
+	local bgMix2 = new("Frame", { BorderSizePixel = 0, BackgroundColor3 = WHITE, BackgroundTransparency = 0.65, Size = UDim2.fromScale(2, 2), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), ZIndex = 1, Parent = bgBase })
+	local grad2 = new("UIGradient", {
+		Rotation = -50,
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0.0, Color3.fromRGB(240, 240, 245)),
+			ColorSequenceKeypoint.new(0.4, Color3.fromRGB(20, 20, 25)),
+			ColorSequenceKeypoint.new(0.7, Color3.fromRGB(110, 110, 120)),
+			ColorSequenceKeypoint.new(1.0, Color3.fromRGB(8, 8, 10)),
+		}),
+		Parent = bgMix2
+	})
+
+	-- ==================== ТЕКСТ FAMIIK ====================
+	local word = new("TextLabel", {
+		BackgroundTransparency = 1,
+		Text = INTRO_CREDIT,
+		FontFace = Util.font(Enum.FontWeight.Bold),
+		TextScaled = true,
+		TextColor3 = WHITE,
+		TextStrokeColor3 = Color3.fromRGB(8, 8, 10), -- Контур для 100% читаемости
+		TextStrokeTransparency = 0.2,
+		TextTransparency = 1,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.47),
+		Size = UDim2.fromScale(0.6, 0.24),
+		ZIndex = 3,
+		Parent = holder
+	})
+
+	-- Хромированный перелив
+	local sheen = new("UIGradient", {
+		Name = "Sheen",
+		Rotation = 25,
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0.0, Color3.fromRGB(150, 150, 155)),
+			ColorSequenceKeypoint.new(0.35, Color3.fromRGB(255, 255, 255)),
+			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(30, 30, 35)),
+			ColorSequenceKeypoint.new(0.65, Color3.fromRGB(255, 255, 255)),
+			ColorSequenceKeypoint.new(1.0, Color3.fromRGB(150, 150, 155)),
+		}),
+		Offset = Vector2.new(-1, 0),
+		Parent = word
+	})
+	Intro.word2d = word
+
+	local start = os.clock()
+	local skipAt
+	local revealed = false
+	local function reveal()
+		if not revealed then
+			revealed = true
+			Util.fire(o.OnReveal)
+		end
+	end
+	local function skip()
+		if not skipAt then skipAt = os.clock() - start end
+	end
+	catch.Activated:Connect(skip)
+	local keyConn = UserInputService.InputBegan:Connect(function(input)
+		local k = input.KeyCode
+		if k == Enum.KeyCode.Space or k == Enum.KeyCode.Return or k == Enum.KeyCode.Escape then
+			skip()
+		end
+	end)
+	table.insert(cleanup, function() keyConn:Disconnect() end)
+
+	local function ease(t)
+		t = math.clamp(t, 0, 1)
+		return 1 - (1 - t) ^ 3
+	end
+	local function spring(t, freq, damp)
+		if t <= 0 then return 0 end
+		local w = freq * 2 * math.pi
+		local wd = w * math.sqrt(1 - damp * damp)
+		return 1 - math.exp(-damp * w * t) * (math.cos(wd * t) + damp * w / wd * math.sin(wd * t))
+	end
+
+	local EXIT, LENGTH = 2.55, 3.35
+	Sound.play("intro")
+	local cam = workspace.CurrentCamera
+
+	local conn
+	conn = RunService.RenderStepped:Connect(function()
+		local success, err = pcall(function()
+			local now = os.clock() - start
+			local t = skipAt and math.max(now, EXIT + (now - skipAt)) or now
+			local exitT = math.clamp((t - EXIT) / (LENGTH - EXIT), 0, 1)
+			local inT = ease((now - 0.25) / 0.6)
+			local out = ease(exitT)
+			local s = Library.ScaleObject.Scale
+			local vs = cam.ViewportSize
+
+			-- 1. Анимация фона (плавное размешивание)
+			grad1.Rotation = (t * 20) % 360
+			grad2.Rotation = (-t * 15 + 45) % 360
+			grad1.Offset = Vector2.new(math.sin(t * 0.8) * 0.18, math.cos(t * 0.6) * 0.18)
+			grad2.Offset = Vector2.new(math.cos(t * 0.7) * 0.18, math.sin(t * 0.9) * 0.18)
+
+			local bgFade = math.clamp(1 - ease(now / 0.45) + out, 0, 1)
+			bgBase.BackgroundTransparency = bgFade
+			bgMix1.BackgroundTransparency = 0.5 + bgFade * 0.5
+			bgMix2.BackgroundTransparency = 0.65 + bgFade * 0.35
+
+			-- 2. Анимация слова FAMIIK
+			local frac = 0.26
+			local wordAspect = 3.2
+			frac = math.min(frac, 0.82 * vs.X / vs.Y / wordAspect)
+			local wordPx = vs.Y * frac
+			local centerY = vs.Y * 0.47
+
+			local sp = spring(t - 0.25, 0.9, 0.55)
+			local scale = (0.85 + 0.15 * sp) * (1 + 0.1 * out)
+			local waveY = math.sin(t * 2.5) * 4 * s
+
+			word.Size = UDim2.fromOffset((wordPx * wordAspect / s) * scale, (wordPx / s) * scale)
+			word.Position = UDim2.fromOffset(vs.X / 2 / s, (centerY + waveY) / s)
+			
+			local textAlpha = 1 - inT * (1 - out)
+			word.TextTransparency = textAlpha
+			word.TextStrokeTransparency = 0.2 + textAlpha * 0.8
+
+			-- Безопасный перелив хрома (строго в рамках -1 .. 1)
+			local sheenCycle = (t * 0.7) % 2
+			sheen.Offset = Vector2.new(math.clamp(sheenCycle - 1, -1, 1), 0)
+
+			-- 3. Подписи (MADE BY и Title)
+			local topY = centerY - wordPx / 2
+			made.Position = UDim2.fromOffset(vs.X / 2 / s, (topY - 14 + 6 * (1 - ease((t - 0.55) / 0.5))) / s)
+			made.TextTransparency = 1 - 0.85 * ease((t - 0.55) / 0.5) * (1 - out)
+
+			if sub then
+				sub.Position = UDim2.fromOffset(vs.X / 2 / s, (centerY + wordPx / 2 + 18 - 6 * (1 - ease((t - 1.05) / 0.5))) / s)
+				sub.TextTransparency = 1 - 0.9 * ease((t - 1.05) / 0.5) * (1 - out)
+			end
+			hint.Position = UDim2.fromOffset(vs.X / 2 / s, (centerY + wordPx / 2 + 76) / s)
+			hint.TextTransparency = 1 - 0.55 * ease((t - 1.2) / 0.6) * (1 - out)
+
+			if t >= EXIT + 0.15 then reveal() end
+			if t >= LENGTH then
+				conn:Disconnect()
+				reveal()
+				finish()
+			end
+		end)
+
+		-- Защита: если возникнет непредвиденная ошибка, меню все равно откроется
+		if not success then
+			conn:Disconnect()
+			reveal()
+			finish()
+		end
+	end)
+
+	table.insert(cleanup, function() conn:Disconnect() end)
+	return {
+		Skip = skip,
+		Finish = function()
+			reveal()
+			finish()
+		end,
+	}
+end
+
+function Intro.after(fn)
+	if Intro.Active then
+		Intro.waiting = Intro.waiting or {}
+		table.insert(Intro.waiting, fn)
+	else
+		fn()
+	end
+end
+
+-- notifications sent while the intro plays appear right after it
+do
+	local baseNotify = Library.Notify
+	function Library:Notify(o)
+		if not Intro.Active then return baseNotify(self, o) end
+		local proxy = { Pending = true }
+		function proxy.Close() proxy.Cancelled = true end
+		proxy.Dismiss = proxy.Close
+		Intro.after(function()
+			if proxy.Cancelled then return end
+			local n = baseNotify(Library, o)
+			proxy.Pending = false
+			setmetatable(proxy, { __index = n })
+			proxy.Close = n.Close
+			proxy.Dismiss = n.Close
+		end)
+		return proxy
+	end
+end
