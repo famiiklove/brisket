@@ -6934,7 +6934,7 @@ local Intro = { Played = env.LiquidGlassSkipIntro == true, Active = false }
 Library._intro = Intro
 
 local AssetService = game:GetService("AssetService")
-local INTRO_CREDIT = "Entity"
+local INTRO_CREDIT = "Famiik"
 
 local BACKDROP = {
 	{ 0.1, 0.15, Color3.fromRGB(46, 32, 190), 0.5 },
